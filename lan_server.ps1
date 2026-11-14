@@ -12,8 +12,14 @@ Write-Host ""
 
 $venvPython = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $venvPython)) {
-    Write-Host "[提示] 还没建虚拟环境，请先双击「启动看板.bat」" -ForegroundColor Yellow
-    exit 1
+    # 兼容：本目录没有 .venv 时，用同级「大数据实训」的虚拟环境
+    $fallback = Join-Path $root "..\大数据实训\.venv\Scripts\python.exe"
+    if (Test-Path $fallback) {
+        $venvPython = (Resolve-Path $fallback).Path
+    } else {
+        Write-Host "[提示] 还没建虚拟环境，请先双击「启动看板.bat」" -ForegroundColor Yellow
+        exit 1
+    }
 }
 
 $ips = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |

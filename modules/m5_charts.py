@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-模块⑤ 数据可视化（对应老师模块「5. 数据可视化（综合看板）」）
-=============================================================
-用 pyecharts 画图，Streamlit 通过 streamlit-echarts 嵌入网页，形成「综合看板」。
-每个函数返回一个 pyecharts 图表对象，数据都来自清洗后的 DataFrame。
+模块⑤ 数据可视化
+==================
+使用 pyecharts 绘制图表，Streamlit 通过 st.components.html 嵌入网页，形成综合看板。
+每个函数返回一个 pyecharts 图表对象，数据均来自清洗后的 DataFrame。
 """
 from __future__ import annotations
 
@@ -39,17 +39,21 @@ def chart_category_bar(df: pd.DataFrame) -> Bar:
     """各商品类别销售额（横向柱状图）。"""
     if df.empty or "商品类别" not in df.columns:
         return _empty("各商品类别销售额")
-    table = (
-        df.groupby("商品类别", as_index=False)[AMOUNT].sum()
-        .sort_values(AMOUNT, ascending=True)
-    )
-    chart = Bar(init_opts=_init("各商品类别销售额（元）"))
+    # 金额转换为万元，避免坐标刻度过于拥挤
+    table = df.groupby("商品类别", as_index=False)[AMOUNT].sum()
+    table["销售额(万元)"] = table[AMOUNT] / 10000
+    table = table.sort_values("销售额(万元)", ascending=True)
+    chart = Bar(init_opts=_init("各商品类别销售额（万元）"))
     chart.add_xaxis(table["商品类别"].astype(str).tolist())
-    chart.add_yaxis("销售额", [round(float(v), 2) for v in table[AMOUNT]], category_gap="45%")
+    chart.add_yaxis(
+        "销售额(万元)",
+        [round(float(v), 2) for v in table["销售额(万元)"]],
+        category_gap="45%",
+    )
     chart.reversal_axis()
     chart.set_series_opts(label_opts=opts.LabelOpts(position="right", formatter="{c}"))
     chart.set_global_opts(
-        xaxis_opts=opts.AxisOpts(name="销售额(元)"),
+        xaxis_opts=opts.AxisOpts(name="销售额(万元)", axislabel_opts=opts.LabelOpts(formatter="{value}")),
         yaxis_opts=opts.AxisOpts(name="商品类别"),
         legend_opts=opts.LegendOpts(is_show=False),
         tooltip_opts=opts.TooltipOpts(trigger="axis", axis_pointer_type="shadow"),
@@ -66,8 +70,8 @@ def chart_monthly_line(df: pd.DataFrame) -> Line:
     chart = Line(init_opts=_init("月度销售趋势（销售额 / 订单数）"))
     chart.add_xaxis(table["月份"].astype(str).tolist())
     chart.add_yaxis(
-        "销售额",
-        [round(float(v), 2) for v in table["销售额"]],
+        "销售额(万元)",
+        [round(float(v) / 10000, 2) for v in table["销售额"]],
         is_smooth=True,
         symbol="circle",
         symbol_size=6,
@@ -87,7 +91,7 @@ def chart_monthly_line(df: pd.DataFrame) -> Line:
     chart.extend_axis(yaxis=opts.AxisOpts(name="订单数", position="right"))
     chart.set_global_opts(
         xaxis_opts=opts.AxisOpts(name="月份", axislabel_opts=opts.LabelOpts(rotate=45)),
-        yaxis_opts=opts.AxisOpts(name="销售额(元)"),
+        yaxis_opts=opts.AxisOpts(name="销售额(万元)"),
         tooltip_opts=opts.TooltipOpts(trigger="axis"),
         legend_opts=opts.LegendOpts(pos_top="5%"),
     )
@@ -130,15 +134,23 @@ def chart_payment_rose(df: pd.DataFrame) -> Pie:
     chart.add(
         "",
         data,
-        radius=["20%", "70%"],
-        center=["50%", "55%"],
+        radius=["18%", "58%"],
+        center=["50%", "48%"],
         rosetype="area",
-        label_opts=opts.LabelOpts(formatter="{b}: {d}%"),
+        label_opts=opts.LabelOpts(
+            position="outside",
+            formatter="{b}: {d}%",
+            font_size=11,
+        ),
+        label_line_opts=opts.PieLabelLineOpts(length=12, length_2=12),
     )
     chart.set_colors(PALETTE)
     chart.set_global_opts(
         title_opts=opts.TitleOpts(title="各支付方式消费额（玫瑰图）"),
-        legend_opts=opts.LegendOpts(orient="vertical", pos_left="2%", pos_top="15%"),
+        # 图例置于底部，避免遮挡图表标签
+        legend_opts=opts.LegendOpts(
+            orient="horizontal", pos_bottom="0%", pos_left="center", item_gap=14
+        ),
         tooltip_opts=opts.TooltipOpts(trigger="item"),
     )
     return chart
@@ -153,10 +165,11 @@ def chart_scatter_age_amount(df: pd.DataFrame, sample: int = 600) -> Scatter:
     if len(work) > sample:
         work = work.sample(sample, random_state=42)
     chart = Scatter(init_opts=_init("年龄与消费金额关系（抽样）"))
+    # Scatter 会自动把 x 轴值与 y 值组合为 [x, y]，因此 y 轴只传入金额一列
     chart.add_xaxis([int(v) for v in work["年龄"]])
     chart.add_yaxis(
         "消费金额",
-        [[int(a), round(float(v), 2)] for a, v in zip(work["年龄"], work[AMOUNT])],
+        [round(float(v), 2) for v in work[AMOUNT]],
         symbol_size=7,
         label_opts=opts.LabelOpts(is_show=False),
     )
@@ -237,17 +250,18 @@ def chart_top_cities(df: pd.DataFrame, top: int = 10) -> Bar:
     """消费额 TOP 城市。"""
     if df.empty or "城市" not in df.columns:
         return _empty("城市消费额 TOP10")
-    table = (
-        df.groupby("城市", as_index=False)[AMOUNT].sum()
-        .sort_values(AMOUNT, ascending=True).tail(top)
-    )
+    table = df.groupby("城市", as_index=False)[AMOUNT].sum()
+    table["销售额(万元)"] = table[AMOUNT] / 10000
+    table = table.sort_values("销售额(万元)", ascending=True).tail(top)
     chart = Bar(init_opts=_init("城市消费额 TOP10"))
     chart.add_xaxis(table["城市"].astype(str).tolist())
-    chart.add_yaxis("销售额", [round(float(v), 2) for v in table[AMOUNT]], category_gap="45%")
+    chart.add_yaxis(
+        "销售额(万元)", [round(float(v), 2) for v in table["销售额(万元)"]], category_gap="45%"
+    )
     chart.reversal_axis()
     chart.set_series_opts(label_opts=opts.LabelOpts(position="right", formatter="{c}"))
     chart.set_global_opts(
-        xaxis_opts=opts.AxisOpts(name="销售额(元)"),
+        xaxis_opts=opts.AxisOpts(name="销售额(万元)", axislabel_opts=opts.LabelOpts(formatter="{value}")),
         yaxis_opts=opts.AxisOpts(name="城市"),
         legend_opts=opts.LegendOpts(is_show=False),
         tooltip_opts=opts.TooltipOpts(trigger="axis", axis_pointer_type="shadow"),
@@ -260,15 +274,35 @@ def chart_amount_funnel(df: pd.DataFrame) -> Funnel:
     """订单金额分档漏斗图。"""
     if df.empty or "金额分档" not in df.columns:
         return _empty("订单金额分档")
-    order = AMOUNT_LABELS
+    # 使用短标签，避免漏斗内部标签重叠
+    short_names = {
+        "0至50元（含）": "0-50元",
+        "50-100元": "50-100元",
+        "100-200元": "100-200元",
+        "200-500元": "200-500元",
+        "500元以上": "500元+",
+    }
+    order = [short_names.get(k, k) for k in AMOUNT_LABELS]
     counts = df["金额分档"].astype(str).value_counts()
-    data = [(k, int(counts.get(k, 0))) for k in order]
+    data = []
+    for key, short in zip(AMOUNT_LABELS, order):
+        value = int(counts.get(key, 0))
+        if value > 0:
+            data.append((short, value))
+    data.sort(key=lambda item: item[1], reverse=True)
+
     chart = Funnel(init_opts=_init("订单金额分档"))
-    chart.add("订单数", data, sort_="none", gap=2, label_opts=opts.LabelOpts(position="inside", formatter="{b}: {c}"))
+    chart.add(
+        "订单数",
+        data,
+        sort_="descending",
+        gap=2,
+        label_opts=opts.LabelOpts(position="inside", formatter="{b}: {c}"),
+    )
     chart.set_colors(PALETTE)
     chart.set_global_opts(
         title_opts=opts.TitleOpts(title="订单金额分档漏斗图"),
-        legend_opts=opts.LegendOpts(orient="vertical", pos_left="2%", pos_top="15%"),
+        legend_opts=opts.LegendOpts(is_show=False),
         tooltip_opts=opts.TooltipOpts(trigger="item", formatter="{b}<br/>订单数：{c}"),
     )
     return chart
@@ -301,12 +335,16 @@ def chart_gender_age_bar(df: pd.DataFrame) -> Bar:
     chart = Bar(init_opts=_init("年龄段 × 性别 销售额"))
     chart.add_xaxis(pivot.index.astype(str).tolist())
     for gender in pivot.columns:
-        chart.add_yaxis(str(gender), [round(float(v), 2) for v in pivot[gender]], stack="stack1")
+        chart.add_yaxis(
+            str(gender),
+            [round(float(v) / 10000, 2) for v in pivot[gender]],
+            stack="stack1",
+        )
     chart.set_colors(PALETTE)
     chart.set_global_opts(
         title_opts=opts.TitleOpts(title="不同年龄段-性别的销售额"),
         xaxis_opts=opts.AxisOpts(name="年龄段"),
-        yaxis_opts=opts.AxisOpts(name="销售额(元)"),
+        yaxis_opts=opts.AxisOpts(name="销售额(万元)"),
         tooltip_opts=opts.TooltipOpts(trigger="axis", axis_pointer_type="shadow"),
     )
     return chart

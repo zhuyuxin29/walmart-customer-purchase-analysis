@@ -1,15 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-模块③ 数据清洗（对应老师模块「3. 数据清洗」）
-=============================================
-本数据集的两个「坑」都在这里处理：
-1. 原始表第 1 行是中文列名（客户ID、年龄、性别……），不是真实数据 —— 已在 m1 剔除，
-   这里再做一次兜底检查；
-2. 所有字段读进来都是 object（文本），年龄/金额/评分/日期都需要转类型。
+模块③ 数据清洗
+================
+处理内容：
+1. 原始表首行为中文列名（已在 m1 中剔除，这里做兜底检查）；
+2. 字段读入时为文本类型，需要统一转换年龄、金额、评分与日期。
 
 清洗步骤：
-  ① 去重 → ② 类型转换 → ③ 缺失值填充 → ④ 异常值标记与范围检查
-  → ⑤ 文本规范化 → ⑥ 派生分析字段
+  去重 → 类型转换 → 缺失值填充 → 异常值标记 → 文本规范化 → 派生字段
 """
 from __future__ import annotations
 
@@ -21,7 +19,8 @@ AGE_BINS = [0, 25, 35, 45, 55, 65, 200]
 AGE_LABELS = ["18-25岁", "26-35岁", "36-45岁", "46-55岁", "56-65岁", "65岁以上"]
 
 # 金额分档（用于漏斗图 / 分档统计）
-AMOUNT_BINS = [0, 50, 100, 200, 500, np.inf]
+# 下界取 -inf，避免 0 元订单落入分档之外
+AMOUNT_BINS = [-np.inf, 50, 100, 200, 500, np.inf]
 AMOUNT_LABELS = ["0至50元（含）", "50-100元", "100-200元", "200-500元", "500元以上"]
 
 NUMERIC_COLS = ["年龄", "消费金额", "评分"]
@@ -101,11 +100,18 @@ def clean(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str], dict]:
         log.append(f"删除购买日期缺失的记录 {n} 条（日期是时间分析的必要字段）。")
 
     # ---------------------------------------------------------- ④ 异常值处理
+    # 金额为右偏长尾分布，不做截断；仅标记缺失、0 元/负数及超过 99.5% 分位的记录
     upper = work["消费金额"].quantile(0.995)
     amount = work["消费金额"]
-    work["金额待核查"] = amount.isna() | amount.lt(0) | amount.gt(upper)
-    flagged = int(work["金额待核查"].sum())
-    log.append(f"标记金额缺失、负数或超过 99.5% 分位的记录 {flagged} 条，保留原金额。")
+    flag_mask = amount.isna() | amount.le(0) | amount.gt(upper)
+    flagged = int(flag_mask.sum())
+    if amount.isna().any():
+        # 金额缺失用中位数填充，保证汇总与分档不出现 NaN（标记仍保留）
+        n_missing_amount = int(amount.isna().sum())
+        work["消费金额"] = amount.fillna(work["消费金额"].median())
+        log.append(f"缺失值填充：「消费金额」用中位数填充 {n_missing_amount} 条（同时标记为待核查）。")
+    work["金额待核查"] = flag_mask
+    log.append(f"标记金额缺失、0 元/负数或超过 99.5% 分位的记录 {flagged} 条，保留原金额。")
 
     if "年龄" in work.columns:
         out_age = int(((work["年龄"] < 18) | (work["年龄"] > 100)).sum())
@@ -126,8 +132,9 @@ def clean(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str], dict]:
         if col in work.columns:
             work[col] = work[col].astype(str).str.strip()
 
-    # 大小写不统一（如 beijing / Beijing、female / Female）按“出现次数最多的写法”归一
-    for col in ["城市", "支付方式", "性别"]:
+    # 大小写不一致时，按出现次数最多的写法归一（如 beijing / Beijing）
+    # 类别字段（商品类别）也统一格式，与日报/看板口径保持一致
+    for col in ["城市", "支付方式", "性别", "商品类别"]:
         if col not in work.columns:
             continue
         series = work[col].astype(str).str.strip()
@@ -139,7 +146,7 @@ def clean(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str], dict]:
                 canonical[key] = value.strip()
         work[col] = series.map(lambda v, c=canonical: c.get(v.strip().lower(), v.strip()))
 
-    # 统一「是/否」类字段的写法（兼容 Yes/No、True/False）
+    # 统一「是/否」写法（兼容 Yes/No、True/False）
     yes_no_map = {
         "Yes": "是", "yes": "是", "YES": "是", "True": "是", "1": "是", "是": "是",
         "No": "否", "no": "否", "NO": "否", "False": "否", "0": "否", "否": "否",
@@ -155,10 +162,10 @@ def clean(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str], dict]:
         work["年份"] = work["购买日期"].dt.year
         work["月份"] = work["购买日期"].dt.to_period("M").astype(str)
         work["季度"] = work["购买日期"].dt.quarter.map(lambda q: f"Q{q}")
-        work["星期"] = work["购买日期"].dt.dayofweek.map(
+        work["星期"] = work["购买日期"].dt.day_of_week.map(
             {0: "周一", 1: "周二", 2: "周三", 3: "周四", 4: "周五", 5: "周六", 6: "周日"}
         )
-        work["是否周末"] = work["购买日期"].dt.dayofweek.isin([5, 6]).map({True: "是", False: "否"})
+        work["是否周末"] = work["购买日期"].dt.day_of_week.isin([5, 6]).map({True: "是", False: "否"})
 
     if "年龄" in work.columns:
         work["年龄段"] = pd.cut(work["年龄"], bins=AGE_BINS, labels=AGE_LABELS)

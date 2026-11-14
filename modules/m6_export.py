@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-模块⑥ 业务结论与数据导出（对应老师模块「6. 业务结论与数据导出」）
-=================================================================
-1. build_conclusions()：根据当前数据自动生成业务结论（数字全部现算，不是写死的）
-2. export_all()：把清洗数据、分析表、图表、结论导出到 outputs/
+模块⑥ 业务结论与数据导出
+==========================
+1. build_conclusions()：根据当前数据生成业务结论（指标实时计算）
+2. export_all()：将清洗数据、分析表与结论导出到 outputs/
 """
 from __future__ import annotations
 
@@ -16,10 +16,6 @@ AMOUNT = "消费金额"
 CATEGORY = "商品类别"
 CITY = "城市"
 MONTH = "月份"
-
-
-def _pct(part: float, total: float) -> str:
-    return f"{(part / total * 100):.1f}%" if total else "0.0%"
 
 
 def build_conclusions(df: pd.DataFrame, kpi: dict, tables: dict[str, pd.DataFrame]) -> list[dict]:
@@ -196,12 +192,17 @@ def excel_bytes(df, kpi, tables):
             sheet = str(name)[:31]
             table.to_excel(writer, sheet_name=sheet)
     buffer.seek(0)
-    with pd.ExcelFile(buffer, engine="openpyxl") as book:
-        exported = book.parse("KPI").set_index("指标")["数值"]
-        groups = book.parse("分组-商品类别") if not df.empty else tables["分组-商品类别"]
+    exported = pd.read_excel(buffer, sheet_name="KPI", engine="openpyxl").set_index("指标")["数值"]
+    buffer.seek(0)
+    groups = (
+        pd.read_excel(buffer, sheet_name="分组-商品类别", engine="openpyxl")
+        if not df.empty
+        else tables["分组-商品类别"]
+    )
     totals = [df[AMOUNT].sum(), kpi["总销售额(元)"], exported["总销售额(元)"], groups["消费总额"].sum()]
     counts = [len(df), kpi["订单数"], exported["订单数"], groups["订单数"].sum()]
-    if len({round(float(value) * 100) for value in totals}) != 1 or len(set(counts)) != 1:
+    # 分组金额逐组四舍五入后求和，允许极小误差；订单数需严格一致
+    if (max(totals) - min(totals)) > max(1.0, 1e-6 * abs(totals[0])) or len(set(counts)) != 1:
         raise ValueError("明细、看板与 Excel 的金额或订单数不一致，请检查汇总规则。")
     return buffer.getvalue()
 

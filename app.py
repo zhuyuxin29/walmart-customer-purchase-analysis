@@ -2,14 +2,8 @@
 """
 沃尔玛客户购买行为数据分析与可视化
 =====================================
-Streamlit + pyecharts 综合看板，按杜老师实训的 6 个模块组织：
-
-    ① 数据加载（真实数据 / 模拟数据）
-    ② 数据探索 EDA
-    ③ 数据清洗
-    ④ 数据分析与聚合
-    ⑤ 数据可视化（综合看板）
-    ⑥ 业务结论与数据导出
+基于 Streamlit + pyecharts 的分析看板，包含经营概览、深入分析、
+数据质量、报告导出四个视图。
 
 运行方式：
     python -m streamlit run app.py
@@ -57,8 +51,11 @@ def get_dictionary():
 
 
 def show_chart(chart, height: int = 380) -> None:
-    """把 pyecharts 图表嵌入 Streamlit。"""
-    components.html(chart.render_embed(), height=height, scrolling=False)
+    """把 pyecharts 图表嵌入 Streamlit；单张图渲染出错时给出提示，不影响整页。"""
+    try:
+        components.html(chart.render_embed(), height=height, scrolling=False)
+    except Exception as exc:  # noqa: BLE001
+        st.warning(f"图表渲染失败：{exc}")
 
 
 def sidebar_filters(df: pd.DataFrame) -> pd.DataFrame:
@@ -177,7 +174,7 @@ def main() -> None:
     if page == "数据质量":
         st.caption("查看完整源表的字段、异常和清洗记录。")
         tab1, tab2, tab3 = st.tabs(["数据来源", "探索统计", "清洗记录"])
-        # ---------------- ① 数据加载 ----------------
+        # ---------------- 数据加载 ----------------
         with tab1:
             st.subheader("数据加载")
             c1, c2 = st.columns([1, 1])
@@ -201,7 +198,7 @@ def main() -> None:
                 st.markdown("**原始数据预览（前 20 行）**")
                 st.dataframe(raw_df.head(20), use_container_width=True)
 
-        # ---------------- ② EDA ----------------
+        # ---------------- 数据探索 ----------------
         with tab2:
             st.subheader("数据探索 EDA")
             overview = m2_eda.overview(raw_df)
@@ -240,7 +237,7 @@ def main() -> None:
             trend = m2_eda.time_trend(raw_df)
             st.dataframe(trend, use_container_width=True, hide_index=True)
 
-        # ---------------- ③ 数据清洗 ----------------
+        # ---------------- 数据清洗 ----------------
         with tab3:
             st.subheader("数据清洗")
             st.markdown("**清洗步骤日志**")
@@ -271,7 +268,7 @@ def main() -> None:
     if page == "深入分析":
         st.caption(f"当前筛选包含 {len(filtered):,} 笔订单")
         tab4, tab5 = st.tabs(["分组与交叉分析", "图表浏览"])
-        # ---------------- ④ 分析与聚合 ----------------
+        # ---------------- 分析与聚合 ----------------
         with tab4:
             st.subheader("数据分析与聚合")
             c1, c2 = st.columns(2)
@@ -296,9 +293,10 @@ def main() -> None:
             st.markdown("**月份 × 商品类别 透视表**")
             st.dataframe(tables["月份×类别透视"], use_container_width=True)
 
-        # ---------------- ⑤ 可视化看板 ----------------
+        # ---------------- 可视化看板 ----------------
         with tab5:
             st.subheader("数据可视化（综合看板）")
+            st.caption("共 12 张图：品类、趋势、性别、支付方式、年龄-金额、箱线、热力、城市 TOP、金额分档、词云、年龄段、折扣对比。")
 
             c1, c2 = st.columns(2)
             with c1:
@@ -336,7 +334,7 @@ def main() -> None:
             with c2:
                 show_chart(m5_charts.chart_discount_bar(filtered), 380)
 
-    # ---------------- ⑥ 业务结论与导出 ----------------
+    # ---------------- 业务结论与导出 ----------------
     if page == "报告导出":
         st.caption(f"导出范围为当前筛选的 {len(filtered):,} 笔订单")
         workbook = m6_export.excel_bytes(filtered, kpi, tables)

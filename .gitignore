@@ -6,3 +6,6 @@ outputs/
 .idea/
 .streamlit/secrets.toml
 *.log
+
+# 本地原始数据集备份
+data/*_原始.xlsx
